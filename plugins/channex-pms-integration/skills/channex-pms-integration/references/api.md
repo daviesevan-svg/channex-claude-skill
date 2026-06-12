@@ -34,8 +34,27 @@ GET  /properties            → data: [{id, attributes: {...}}, ...]
 
 ATTRS (all optional except title + currency): `title`, `currency`
 (ISO 4217), `email`, `phone`, `website`, `country` (2-letter),
-`state`, `city`, `address`, `zip_code`, `timezone` (IANA),
-`content: {description}`. Omit nulls rather than sending them.
+`state`, `city`, `address`, `zip_code`, `timezone` (IANA), `content`.
+Omit nulls rather than sending them.
+
+`content` is an OBJECT, not a string:
+
+```json
+"content": {
+  "description": "Some Property Description Text",
+  "important_information": "Notes shown in booking confirmation emails",
+  "photos": [
+    {"url": "https://img.channex.io/<uuid>/", "position": 0,
+     "description": "Room View", "author": "Author Name", "kind": "photo"}
+  ]
+}
+```
+
+- `description` (string), `important_information` (string, property-only)
+- `photos` (array): each has `url`, `position` (int; 0 = cover photo),
+  `description`, `author`, `kind` ("photo" | "ad" | "menu"). On updates
+  a photo may also carry its `id` (UUID); responses add system fields
+  (`id`, `property_id`).
 
 ### Room type
 
@@ -47,9 +66,26 @@ GET  /room_types?filter[property_id]=UUID
 
 ATTRS: `property_id` (UUID), `title`, `count_of_rooms` (int),
 `occ_adults`, `occ_children`, `occ_infants`, `default_occupancy`
-(must be ≤ occ_adults), `room_kind` ("room" | "dorm"),
-`content: {description}`. New room types start with availability 0 —
-you must push availability after creating them.
+(must be ≤ occ_adults), `room_kind` ("room" | "dorm"), `content`.
+New room types start with availability 0 — you must push availability
+after creating them.
+
+`content` is an OBJECT (same photo shape as property, but NO
+`important_information`):
+
+```json
+"content": {
+  "description": "Some Room Type Description Text",
+  "photos": [
+    {"url": "https://img.channex.io/<uuid>/", "position": 0,
+     "description": "Room View", "author": "Author Name", "kind": "photo"}
+  ]
+}
+```
+
+`description` (string) and `photos` (array, same fields as property
+photos; 0 = cover). Responses add `id`/`property_id`/`room_type_id`
+to each photo.
 
 ### Rate plan
 

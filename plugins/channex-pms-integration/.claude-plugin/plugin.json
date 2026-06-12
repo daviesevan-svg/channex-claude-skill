@@ -1,0 +1,9 @@
+{
+  "name": "channex-pms-integration",
+  "description": "Integrate any PMS with the Channex channel manager: push availability/rates/restrictions to OTAs efficiently (deltas, range compression, partial updates) and ingest channel bookings via the revisions feed — with the verification discipline and gotchas baked in.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Evan Davies"
+  },
+  "license": "MIT"
+}

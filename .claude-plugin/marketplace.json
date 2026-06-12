@@ -1,0 +1,33 @@
+{
+  "name": "channex-skills",
+  "owner": {
+    "name": "Evan Davies",
+    "url": "https://github.com/daviesevan-svg"
+  },
+  "plugins": [
+    {
+      "name": "channex-pms-integration",
+      "source": "./plugins/channex-pms-integration",
+      "description": "Teach Claude to integrate any PMS codebase with the Channex channel manager API: delta ARI pushes to OTAs, booking ingestion via the revisions feed, and the operational best practices (idempotent sync, partial updates, readback verification, ack discipline).",
+      "version": "1.0.0",
+      "license": "MIT",
+      "category": "integrations",
+      "keywords": [
+        "channex",
+        "channel-manager",
+        "pms",
+        "hotel",
+        "vacation-rental",
+        "ota",
+        "booking.com",
+        "airbnb",
+        "ari",
+        "hospitality"
+      ],
+      "author": {
+        "name": "Evan Davies"
+      },
+      "repository": "https://github.com/daviesevan-svg/channex-claude-skill"
+    }
+  ]
+}

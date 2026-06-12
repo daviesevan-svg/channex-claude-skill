@@ -1,7 +1,12 @@
 # Channex API reference (verified shapes)
 
-Every shape below was verified against a live Channex staging server.
-For anything not covered here, fetch the official docs — every page at
+Every endpoint, payload, and response shape below was verified by
+calling a live Channex staging server (not transcribed from docs) —
+request bodies, the `data`/`meta` envelope, the error envelope, and the
+read-back shapes for availability and restrictions. Field *availability*
+can still vary by account/plan tier, so treat unexpected 422s as a cue
+to re-check the live docs. For anything not covered here, fetch the
+official docs — every page at
 https://docs.channex.io has a markdown variant (append `.md` to the
 URL), `https://docs.channex.io/sitemap.md` lists all pages, and
 `https://docs.channex.io/llms-full.txt` is the full corpus.
@@ -11,9 +16,13 @@ URL), `https://docs.channex.io/sitemap.md` lists all pages, and
 - Base URLs: `https://staging.channex.io/api/v1` (sandbox),
   `https://app.channex.io/api/v1` (production)
 - Auth: `user-api-key: <key>` header on every request
-- Success: 2xx with `{"data": {...}}` or `{"data": [...]}` — unwrap it
+- Success: 2xx with `{"data": {...}}` or `{"data": [...]}` — unwrap it.
+  List/feed responses also carry a sibling `"meta"` object (pagination)
 - Errors: `{"errors": {"code": "...", "title": "...", "details": [...]}}`
-  with 400/401/404/422
+  with 400/401/404/422. `details` is an array and is OPTIONAL — present
+  on validation errors (e.g. 400 → `["restrictions is required"]`),
+  absent on auth errors (401 → just `code` + `title`). Don't assume it
+  exists when formatting an error
 - POST/PUT bodies wrap attributes under the entity name:
   `{"property": {...}}`, `{"room_type": {...}}`, `{"rate_plan": {...}}`
 - Keep request payloads under 10 MB; send availability and
@@ -100,7 +109,13 @@ ATTRS: `property_id`, `room_type_id` (one rate plan belongs to ONE
 room type), `title` (unique per property), `currency`,
 `sell_mode` ("per_room" | "per_person"), `rate_mode` ("manual" is the
 PMS-driven mode; "derived"/"auto"/"cascade" exist),
-`options: [{"occupancy": N, "is_primary": true, "rate": 0}]`.
+`options: [{"occupancy": N, "is_primary": true, "rate": 0}]` — that
+minimal write shape is enough to create a plan. Note the asymmetry: on
+WRITE `rate` is an integer in minor units (cents); in the RESPONSE each
+option comes back richer — `{id, occupancy, rate: "0.00" (decimal
+string), is_primary, derived_option, rate_category_id, inherit_* …}`.
+The option `id` only matters if you later target one specific occupancy
+option; for a single-occupancy plan you can ignore it.
 
 ## ARI (availability, rates, restrictions)
 

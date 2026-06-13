@@ -212,6 +212,55 @@ the same — so the mandatory parts are: keep the poller/webhook handler
 healthy + monitored, ack promptly, drain-until-empty, and keep the
 manual time-scoped `GET /bookings` recovery ready for the rare outage.
 
+## Connecting OTA channels (the Channel API)
+
+Connecting an OTA (Booking.com, etc.) to the property can be done in the
+Channex dashboard, OR — if the account has **Channel API access**
+(historically Whitelabel-gated; the first `test_connection` call tells
+you) — programmatically via the `/channels` endpoints, so the PMS can
+offer its own "connect a channel" flow. The shapes are in
+`references/api.md`; the flow and its traps:
+
+1. **Test the OTA credentials** — `POST /channels/test_connection`
+   (`{channel, settings: {hotel_id}}`) before anything else; `hotel_id`
+   is the OTA's property id (Booking.com extranet id).
+2. **Read the OTA's rooms/rates** — `POST /channels/mapping_details`.
+   For Booking.com this returns `rooms[].rates[]` (note: `rooms`/`rates`,
+   not room_types/rate_plans), each room/rate keyed by an **integer**
+   code, each rate carrying `pricing` ("OBP" occupancy-based / "PP"
+   per-person), `max_persons`, `occupancies`.
+3. **Map** each OTA room+rate to one of your rate plans and **create**
+   the channel — `POST /channels` with a `rate_plans` array of
+   `{rate_plan_id, settings: {room_type_code, rate_plan_code, occupancy,
+   pricing_type, primary_occ}}`.
+4. **Activate** — channels are created **inactive**; `POST
+   /channels/:id/activate` goes live (`/deactivate` pauses).
+
+Traps (all confirmed against staging):
+
+- **Codes are integers.** `room_type_code`/`rate_plan_code` come back as
+  integers — send them as integers. Strings make Channex file the
+  mapping under "removed rates" and the OTA side shows "Not mapped". (UI
+  `<select>` values are strings → match by string, store the integer.)
+- **`group_id` is required** on create and must be one the account can
+  access, else `422 "You not have access to requested group"`. Fetch
+  `GET /groups` and pick the group that owns your property.
+- **No duplicate mappings** — one OTA room+rate pair maps to at most one
+  of your rate plans; reject duplicates before create.
+- **Delete needs an inactive channel** — `DELETE /channels/:id` returns
+  `422 {"channel": ["is active"]}` if live, so deactivate first.
+- **Readback-first.** `mapping_details`/per-person restriction shapes
+  aren't fully in the public docs and vary by OTA — call them against a
+  test hotel id and inspect the real JSON before trusting a parser. Use
+  a THROWAWAY rate plan/channel for shape-probing and delete it, so a
+  real connected channel isn't disturbed. (Booking.com test hotel ids
+  from the cert guide are shared across integrators — create may 422 as
+  already used.)
+- **Per-person pricing** changes the rate plan (`sell_mode: per_person`,
+  one `options` entry per occupancy) AND the ARI: restrictions then take
+  a `rates` ARRAY of `{occupancy, rate}` (not a scalar `rate`). See
+  `references/api.md`.
+
 ## Verification & ongoing health
 
 People trust channel managers with real money — build the checker, not
@@ -230,8 +279,9 @@ just the integration:
   a booking manually; it arrives via the feed within a minute. Walk
   the user through this — then cancel it and confirm the cancellation
   flows too.
-- For go-live, OTA channel mapping happens in the Channex dashboard
-  (not the API), and Channex runs PMS certification tests:
+- For go-live, OTA channel mapping is done either in the Channex
+  dashboard or via the Channel API (see "Connecting OTA channels"
+  above), and Channex runs PMS certification tests:
   https://docs.channex.io/api-v.1-documentation/pms-certification-tests.md
 
 ## Common traps

@@ -155,6 +155,30 @@ is what makes field-level delta pushes possible — exploit it.
 
 **Past dates are rejected** — filter `date >= today` before sending.
 
+### Per-person (occupancy-based) rates
+
+For a `sell_mode: "per_person"` rate plan, restrictions carry a `rates`
+ARRAY keyed by occupancy — NOT a scalar `rate`, and NOT an object keyed
+by occupancy:
+
+```json
+POST /restrictions
+{"values": [
+  {"property_id": UUID, "rate_plan_id": UUID,
+   "date_from": "2026-07-01", "date_to": "2026-07-14",
+   "rates": [
+     {"occupancy": 1, "rate": 9000},
+     {"occupancy": 2, "rate": 11000},
+     {"occupancy": 3, "rate": 13000}
+   ],
+   "min_stay_arrival": 2, "stop_sell": false}
+]}
+```
+
+min-stay/closures stay single-valued alongside the array. A rate-only
+delta sends just the `rates` key. (per_room plans keep the scalar
+`rate` shown above.)
+
 ### Reading ARI back (for verification)
 
 ```
@@ -171,6 +195,76 @@ GET /restrictions?filter[property_id]=UUID
 `filter[restrictions]` is REQUIRED on the restrictions read — without
 it the API returns 400 "restrictions is required". Note rates read
 back as decimal strings in major units, not the cents you wrote.
+
+## Channel connection (the Channel API)
+
+Connecting/mapping OTA channels via the API (vs the dashboard) may
+require **Channel API access** (historically Whitelabel-gated) — the
+first `test_connection` call confirms it. Shapes verified against
+staging with Booking.com.
+
+```
+GET  /channels/list                       → OTAs available to connect
+GET  /channels                            → connected channels
+GET  /channels/:id
+POST /channels/test_connection            {"channel","settings":{"hotel_id"}}
+POST /channels/mapping_details            {"channel","settings":{"hotel_id"}}
+POST /channels                            {"channel": ATTRS}        → 201
+PUT  /channels/:id                        {"channel": ATTRS}
+POST /channels/:id/activate               {}      → go live
+POST /channels/:id/deactivate             {}      → pause
+DELETE /channels/:id                              → must be inactive first
+GET  /groups                              → groups the key can access
+```
+
+**`mapping_details` response (Booking.com)** — after unwrapping `data`:
+
+```json
+{"rooms": [
+  {"id": 651942003, "title": "Double Room", "max_children": null,
+   "rates": [
+     {"id": 18527581, "title": "standard rate", "pricing": "OBP",
+      "max_persons": 2, "occupancies": [1,2], "readonly": false}
+   ]}
+]}
+```
+
+Top key is `rooms` (not `room_types`), rates under `rates` (not
+`rate_plans`). Room/rate `id`s are the **integer** `room_type_code` /
+`rate_plan_code` you send on create.
+
+**Create a channel:**
+
+```json
+POST /channels
+{"channel": {
+  "channel": "BookingCom",
+  "group_id": "<group that owns the property>",   // REQUIRED
+  "is_active": false,                              // created inactive
+  "title": "Booking.com — My Hotel",
+  "properties": ["<property UUID>"],
+  "rate_plans": [
+    {"rate_plan_id": "<your rate plan UUID>",
+     "settings": {"room_type_code": 651942003, "rate_plan_code": 18527581,
+                  "occupancy": 2, "pricing_type": "OBP", "primary_occ": true,
+                  "readonly": false, "occ_changed": false}}
+  ],
+  "settings": {"hotel_id": "6519420"}
+}}
+```
+
+Gotchas (all hit on staging):
+- `room_type_code`/`rate_plan_code` must be **integers** — strings →
+  the mapping lands under "removed rates", OTA side "Not mapped".
+- Missing/inaccessible `group_id` → `422 {"code":
+  "unprocessable_entity", "details": "You not have access to requested
+  group"}`. Resolve via `GET /groups` (the group whose
+  `relationships.properties` includes your property UUID).
+- `DELETE` on an active channel → `422 {"channel": ["is active"]}` —
+  `POST /channels/:id/deactivate` first.
+- Activate/deactivate/load_and_save_ari return
+  `{"data": {"meta": {"message": "Success"}}}`.
+- One OTA room+rate pair should map to at most one local rate plan.
 
 ## Bookings (inbound)
 

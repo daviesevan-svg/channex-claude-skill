@@ -141,10 +141,13 @@ mechanisms; they share the same apply-then-ack core and the same
   notification, the pull is the source of truth.)
 
 These are complementary, not either/or: a webhook can be missed (your
-endpoint down, a network blip), so even with webhooks, keep a
-low-frequency feed poll as the backstop — within the 30-minute window
-it catches anything the webhook dropped. The `user_id` in the payload
-is the actor; it lets you ignore events your own pushes caused.
+endpoint down, a network blip), so even with webhooks, keep a feed poll
+as the backstop. **Every ~15 minutes is the sweet spot** — that's two
+poll cycles inside the 30-minute expiry window, so a missed webhook is
+still caught with margin even if one poll cycle also slips. (If you're
+feed-only with no webhooks, poll faster — every minute — since the feed
+is then your only real-time path.) The `user_id` in the payload is the
+actor; it lets you ignore events your own pushes caused.
 
 Either way, `GET /booking_revisions/:id` fetches one revision by id, and
 the same rules keep ingestion robust:

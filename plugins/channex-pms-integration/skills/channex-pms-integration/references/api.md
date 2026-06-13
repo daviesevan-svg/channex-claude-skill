@@ -177,11 +177,30 @@ back as decimal strings in major units, not the cents you wrote.
 ```
 GET  /booking_revisions/feed          → unacked revisions, oldest first
 POST /booking_revisions/:revision_id/ack   {}
+GET  /bookings?filter[property_id]=UUID    → full booking list (reconciliation)
+GET  /booking_revisions?filter[...]        → revision list (not the feed)
 ```
 
-Use the revisions feed, NOT `GET /bookings...` — that's the documented
-PMS pattern. Acked revisions never reappear. The feed covers the WHOLE
-account (every property the key can see).
+The feed is the real-time path: `GET /booking_revisions/feed` covers
+the WHOLE account in one call (every property the key can see; optional
+`filter[property_id]` exists but isn't needed). It's paginated —
+oldest-first, `meta: {total, limit (default 10), page, order_by,
+order_direction}`. Drain it until `meta.total` is 0 rather than
+grabbing one page per tick.
+
+**Critical: the feed is a 30-minute window, not a durable queue.** An
+unacked revision is re-served for ~30 minutes (with a warning email to
+the account owner), then it DROPS OUT of the feed permanently — it does
+NOT redeliver forever. Acked revisions also never reappear. Either way,
+anything not acked within 30 minutes is gone *from the feed*.
+
+So a feed-only integration loses bookings on any outage > 30 min. The
+recovery path is the booking LIST endpoints (which are durable, not a
+queue): periodically `GET /bookings?filter[property_id]=...` (paginated,
+newest-first) and backfill anything the PMS is missing. `GET
+/booking_revisions` lists revisions similarly. These lists — NOT the
+feed — are your reconciliation source of truth; the feed is just the
+low-latency notifier on top.
 
 Revision item: `{"id": REVISION_UUID, "attributes": {...}}` with
 attributes:
@@ -211,8 +230,10 @@ their Booking.com test channel (see the certification doc).
 
 - No published hard rate limits, but batch via ranges and debounce —
   hundreds of small requests per minute is abuse-shaped.
-- Unacked revisions trigger warning emails to the account owner after
-  ~30 minutes.
+- Unacked revisions trigger a warning email to the account owner and
+  expire out of the feed after ~30 minutes (see the feed section) —
+  pair the feed with `GET /bookings` reconciliation so an outage can't
+  silently lose a booking.
 - Channex applies availability auto-decrement on bookings only if the
   property settings enable it; a PMS-driven integration should push
   authoritative availability itself and treat Channex's counters as a

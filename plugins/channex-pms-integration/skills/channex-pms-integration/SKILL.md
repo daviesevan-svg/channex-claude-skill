@@ -125,13 +125,38 @@ Poll `GET /booking_revisions/feed` (every minute is the conventional
 cadence), apply each revision, then ack it with
 `POST /booking_revisions/:id/ack`. Rules that keep this robust:
 
-- **Ack only after applying successfully.** Un-acked revisions
-  redeliver on the next poll — that's the retry mechanism. (Channex
-  emails warnings for revisions unacked ~30 min, so don't let a
-  poison revision sit silently: log loudly.)
-- **The feed is account-wide.** Skip-and-ack revisions for property
-  ids that aren't in your mapping table, or stray test properties on
-  the account will wedge the poller.
+- **The feed is a 30-minute window, NOT a durable queue.** An unacked
+  revision is re-served for only ~30 minutes (with a warning email),
+  then it DROPS OUT of the feed for good. So the feed alone is not a
+  safe system of record — anything you fail to ack within 30 minutes
+  (poller outage, deploy, a bug that crashes processing) is gone from
+  the feed and will never redeliver.
+- **Therefore you need TWO paths, not one:**
+  1. *Real-time:* drain the feed and ack-after-apply (below).
+  2. *Reconciliation:* a periodic sweep (e.g. hourly, and always on
+     poller startup after any downtime) that lists `GET /bookings`
+     for each managed property and backfills anything missing locally.
+     This is the safety net that makes a >30-min outage survivable.
+     Skipping it means silently losing bookings — unacceptable for a
+     channel manager. Build it from the start, not "later."
+- **Drain until empty; don't fall behind the page limit.** The feed
+  returns oldest-first and defaults to `limit: 10`. If more than 10
+  revisions are waiting (`meta.total > meta.limit`), loop immediately
+  rather than waiting for the next tick — a surge (channel backfill,
+  reconnect dump) can otherwise outrun a once-per-minute poll and push
+  revisions toward the 30-minute cliff.
+- **Ack only after applying successfully — but a failure can't block
+  the queue OR sit unhandled.** Leave a failed revision un-acked so it
+  retries, but keep draining the rest (don't `break` on first error),
+  and alert on it — because the 30-minute expiry means a poison
+  revision you ignore becomes permanent data loss, not an indefinite
+  retry. The reconciliation sweep is the backstop, but loud alerting
+  is how you fix the cause before the window closes.
+- **The feed is account-wide.** ONE call covers every property the key
+  can see (optional `filter[property_id]` exists but you don't need it
+  for normal polling). Skip-and-ack revisions for property ids that
+  aren't in your mapping table, or stray test properties on the
+  account will wedge the poller.
 - Revision statuses: `new` → create local booking; `cancelled` → find
   via the booking mapping and cancel; `modified` → safest default is
   log + ack + notify a human, because blindly applying OTA
@@ -148,8 +173,11 @@ cadence), apply each revision, then ack it with
   type; map `ota_name` into the PMS's source field; keep
   `ota_reservation_code` — staff need it on the phone with the OTA.
 
-Webhooks exist as a push alternative to polling; polling is simpler,
-certifiable, and good enough to start. Note it as a future upgrade.
+Webhooks exist as a lower-latency push alternative to feed polling;
+polling is simpler and certifiable, so start there. But note: whether
+you poll or use webhooks, the 30-minute feed expiry is the same, so the
+`GET /bookings` reconciliation sweep is mandatory either way — it is
+not the thing you defer.
 
 ## Verification & ongoing health
 

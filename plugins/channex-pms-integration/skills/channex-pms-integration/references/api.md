@@ -176,10 +176,43 @@ back as decimal strings in major units, not the cents you wrote.
 
 ```
 GET  /booking_revisions/feed          → unacked revisions, oldest first
-POST /booking_revisions/:revision_id/ack   {}
+GET  /booking_revisions/:id           → one revision by id (use after a webhook)
+POST /booking_revisions/:id/ack       {}
+POST /webhooks                        {"webhook": {...}}  → register a callback
 GET  /bookings?filter[property_id]=UUID    → full booking list (reconciliation)
 GET  /booking_revisions?filter[...]        → revision list (not the feed)
 ```
+
+Two delivery mechanisms, same apply→ack core:
+
+**Webhook (push).** Register:
+
+```json
+POST /webhooks
+{"webhook": {
+  "callback_url": "https://you/api/channex",
+  "event_mask": "booking_new;booking_modification;booking_cancellation",
+  "property_id": null,          // null = all properties on the account
+  "is_active": true,
+  "send_data": true
+}}
+```
+
+Channex then POSTs your callback (events: `booking_new` /
+`booking_modification` / `booking_cancellation`, or `"*"`):
+
+```json
+{"event": "booking",
+ "payload": {"booking_id": "...", "property_id": "...", "revision_id": "..."},
+ "user_id": null, "timestamp": "2026-..."}
+```
+
+Take `revision_id` → `GET /booking_revisions/:id` → apply → ack. The
+webhook is a notification; the pull is the source of truth. `user_id`
+is the actor (null/your own id ⇒ skip events you caused).
+
+**Feed (poll).** `GET /booking_revisions/feed` (below) — also the
+backstop for missed webhooks within the 30-minute window.
 
 The feed is the real-time path: `GET /booking_revisions/feed` covers
 the WHOLE account in one call (every property the key can see; optional
@@ -249,5 +282,7 @@ their Booking.com test channel (see the certification doc).
   mirror, not a source.
 - Certification (required before production OTA connections):
   https://docs.channex.io/api-v.1-documentation/pms-certification-tests.md
-- Webhooks (`/webhooks` CRUD) can replace feed polling later; start
-  with polling — simpler and certifiable.
+- Webhooks (`/webhooks` CRUD) are the low-latency push path (see the
+  bookings section); feed polling is simpler to start with and doubles
+  as the backstop for missed webhooks. They complement each other —
+  webhooks don't remove the 30-minute window or the ack requirement.

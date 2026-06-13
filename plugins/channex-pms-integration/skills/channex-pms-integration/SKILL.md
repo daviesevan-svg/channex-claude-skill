@@ -119,11 +119,35 @@ and `GET /restrictions?...&filter[restrictions]=rate` for sample dates
 and compare against locally computed values. (The `filter[restrictions]`
 param is required on restrictions reads — you get a 400 without it.)
 
-### 4. Inbound booking feed
+### 4. Inbound bookings
 
-Poll `GET /booking_revisions/feed` (every minute is the conventional
-cadence), apply each revision, then ack it with
-`POST /booking_revisions/:id/ack`. Rules that keep this robust:
+Channex delivers OTA bookings as *revisions*. There are two delivery
+mechanisms; they share the same apply-then-ack core and the same
+30-minute expiry, and the robust setup uses both:
+
+- **Feed polling (simplest — start here).** Poll
+  `GET /booking_revisions/feed` (every minute is conventional), apply
+  each revision, ack with `POST /booking_revisions/:id/ack`.
+- **Webhooks (low-latency push).** Register a callback with
+  `POST /webhooks` (`event_mask: "booking_new;booking_modification;
+  booking_cancellation"` or `"*"`, `property_id` or null for global).
+  On a booking event Channex POSTs you
+  `{event, payload: {booking_id, property_id, revision_id}, user_id,
+  timestamp}` — note it carries the `revision_id`, not the full
+  booking. The expected flow is: take that `revision_id` →
+  `GET /booking_revisions/:id` to pull the authoritative payload →
+  apply → ack. (Webhooks can set `send_data: true` to include the body,
+  but pulling by id is the recommended pattern — the webhook is a
+  notification, the pull is the source of truth.)
+
+These are complementary, not either/or: a webhook can be missed (your
+endpoint down, a network blip), so even with webhooks, keep a
+low-frequency feed poll as the backstop — within the 30-minute window
+it catches anything the webhook dropped. The `user_id` in the payload
+is the actor; it lets you ignore events your own pushes caused.
+
+Either way, `GET /booking_revisions/:id` fetches one revision by id, and
+the same rules keep ingestion robust:
 
 - **The feed is a 30-minute window, NOT a durable queue.** An unacked
   revision is re-served for only ~30 minutes (with a warning email),
@@ -180,10 +204,9 @@ cadence), apply each revision, then ack it with
   type; map `ota_name` into the PMS's source field; keep
   `ota_reservation_code` — staff need it on the phone with the OTA.
 
-Webhooks exist as a lower-latency push alternative to feed polling;
-polling is simpler and certifiable, so start there. Either way the
-30-minute feed expiry is the same — so the thing that's mandatory is
-keeping the poller healthy + monitored and acking promptly, with the
+Whichever delivery mechanism you use (or both), the 30-minute expiry is
+the same — so the mandatory parts are: keep the poller/webhook handler
+healthy + monitored, ack promptly, drain-until-empty, and keep the
 manual time-scoped `GET /bookings` recovery ready for the rare outage.
 
 ## Verification & ongoing health

@@ -195,12 +195,21 @@ NOT redeliver forever. Acked revisions also never reappear. Either way,
 anything not acked within 30 minutes is gone *from the feed*.
 
 So a feed-only integration loses bookings on any outage > 30 min. The
-recovery path is the booking LIST endpoints (which are durable, not a
-queue): periodically `GET /bookings?filter[property_id]=...` (paginated,
-newest-first) and backfill anything the PMS is missing. `GET
-/booking_revisions` lists revisions similarly. These lists — NOT the
-feed — are your reconciliation source of truth; the feed is just the
-low-latency notifier on top.
+recovery path is the durable booking LIST endpoint — but use it as a
+MANUAL, time-scoped, after-an-outage tool, not a cron. A periodic
+full-list sweep re-pulls the same bookings forever and is heavy on both
+sides for no benefit while the poller is healthy. After a known gap:
+`GET /bookings?filter[inserted_at][gte]=<outage_start>` (paginated,
+default `limit` 10, newest-first; also supports `filter[arrival_date]`
+/`filter[departure_date]` `[gte]`/`[lte]`) and backfill anything the PMS
+is missing, deduped by Channex booking id.
+
+`filter[inserted_at]` is what keeps recovery cheap — scope to bookings
+created since the outage. (`GET /booking_revisions` lists revisions
+similarly. An unacked filter on that list would be the ideal scoped
+recovery source, but it is NOT in the public docs — the feed is
+presented as the only unacked view — so confirm it exists on your
+account before depending on it.)
 
 Revision item: `{"id": REVISION_UUID, "attributes": {...}}` with
 attributes:

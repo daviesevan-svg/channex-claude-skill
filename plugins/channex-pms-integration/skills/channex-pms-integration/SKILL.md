@@ -130,28 +130,35 @@ cadence), apply each revision, then ack it with
   then it DROPS OUT of the feed for good. So the feed alone is not a
   safe system of record — anything you fail to ack within 30 minutes
   (poller outage, deploy, a bug that crashes processing) is gone from
-  the feed and will never redeliver.
-- **Therefore you need TWO paths, not one:**
-  1. *Real-time:* drain the feed and ack-after-apply (below).
-  2. *Reconciliation:* a periodic sweep (e.g. hourly, and always on
-     poller startup after any downtime) that lists `GET /bookings`
-     for each managed property and backfills anything missing locally.
-     This is the safety net that makes a >30-min outage survivable.
-     Skipping it means silently losing bookings — unacceptable for a
-     channel manager. Build it from the start, not "later."
+  the feed and will never redeliver. The defense is to keep the poller
+  healthy and ack promptly (below), and to *monitor* it so a >30-min
+  stall is itself an alert.
 - **Drain until empty; don't fall behind the page limit.** The feed
   returns oldest-first and defaults to `limit: 10`. If more than 10
   revisions are waiting (`meta.total > meta.limit`), loop immediately
   rather than waiting for the next tick — a surge (channel backfill,
   reconnect dump) can otherwise outrun a once-per-minute poll and push
-  revisions toward the 30-minute cliff.
+  revisions toward the 30-minute cliff. Staying drained is the real
+  protection; recovery (below) is the unhappy path.
 - **Ack only after applying successfully — but a failure can't block
   the queue OR sit unhandled.** Leave a failed revision un-acked so it
-  retries, but keep draining the rest (don't `break` on first error),
-  and alert on it — because the 30-minute expiry means a poison
-  revision you ignore becomes permanent data loss, not an indefinite
-  retry. The reconciliation sweep is the backstop, but loud alerting
-  is how you fix the cause before the window closes.
+  retries within the window, but keep draining the rest (don't `break`
+  on first error), and alert on it — because the 30-minute expiry means
+  a poison revision you ignore becomes permanent loss, not indefinite
+  retry. Loud alerting is how you fix the cause before the window
+  closes.
+- **Recovery after a real outage is MANUAL and time-scoped, not a
+  cron.** Do NOT run a periodic full booking-list sweep "just in case"
+  — it re-pulls the same bookings endlessly and is heavy on both
+  sides for no benefit while the poller is healthy. Instead, build a
+  one-shot recovery you trigger *after* a known >30-min gap: list
+  `GET /bookings?filter[inserted_at][gte]=<outage_start>` (paginated),
+  and create anything the PMS is missing (deduped by Channex booking
+  id), reusing the same apply logic as the feed. Scoping to bookings
+  created since the outage keeps it cheap. (If your Channex account
+  exposes an unacked filter on the revisions list, that's an even more
+  scoped recovery source — confirm it exists before relying on it; the
+  public docs present the feed as the only unacked view.)
 - **The feed is account-wide.** ONE call covers every property the key
   can see (optional `filter[property_id]` exists but you don't need it
   for normal polling). Skip-and-ack revisions for property ids that
@@ -174,10 +181,10 @@ cadence), apply each revision, then ack it with
   `ota_reservation_code` — staff need it on the phone with the OTA.
 
 Webhooks exist as a lower-latency push alternative to feed polling;
-polling is simpler and certifiable, so start there. But note: whether
-you poll or use webhooks, the 30-minute feed expiry is the same, so the
-`GET /bookings` reconciliation sweep is mandatory either way — it is
-not the thing you defer.
+polling is simpler and certifiable, so start there. Either way the
+30-minute feed expiry is the same — so the thing that's mandatory is
+keeping the poller healthy + monitored and acking promptly, with the
+manual time-scoped `GET /bookings` recovery ready for the rare outage.
 
 ## Verification & ongoing health
 
